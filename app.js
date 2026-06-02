@@ -1,6 +1,18 @@
 const STORAGE_KEY = "subscription-tracker-v1";
 
 const defaultCategories = [
+  { id: "ai", name: "AI", icon: "🤖" },
+  { id: "vpn", name: "VPN", icon: "🛡️" },
+  { id: "life", name: "生活", icon: "🏠" },
+  { id: "entertainment", name: "娱乐", icon: "🎬" },
+  { id: "productivity", name: "效率工具", icon: "🧰" },
+  { id: "learning", name: "学习", icon: "📚" },
+  { id: "cloud", name: "云服务", icon: "☁️" },
+  { id: "finance", name: "财务", icon: "💳" },
+  { id: "music", name: "音乐", icon: "🎧" },
+  { id: "video", name: "视频", icon: "📺" },
+  { id: "storage", name: "存储", icon: "💾" },
+  { id: "other", name: "其他", icon: "🧩" }
 ];
 
 const defaultCurrencies = ["CNY", "USD", "EUR", "JPY", "HKD"];
@@ -53,15 +65,41 @@ function init() {
 
 function ensureDefaults() {
   const { data } = appState;
-  data.categories = data.categories?.length ? data.categories : defaultCategories;
+
+  data.categories = mergeById(data.categories || [], defaultCategories);
   data.currencies = data.currencies?.length ? data.currencies : defaultCurrencies;
   data.subscriptions = data.subscriptions?.length ? data.subscriptions : seedSubscriptions();
+
+  data.subscriptions = data.subscriptions.map(({ paymentMethod, ...sub }) => ({
+    ...sub,
+    categoryId: sub.categoryId || "other",
+    status: sub.status || "active"
+  }));
+
   data.billingRecords = data.billingRecords ?? [];
   data.settings = data.settings ?? { theme: "light", homeCurrency: "CNY", insightsCurrency: "CNY" };
+
   if (!data.settings.homeCurrency) data.settings.homeCurrency = "CNY";
   if (!data.settings.insightsCurrency) data.settings.insightsCurrency = "CNY";
+
   appState.insights.currency = data.settings.insightsCurrency;
+
   saveState(data);
+}
+
+function mergeById(existing = [], defaults = []) {
+  const map = new Map();
+
+  defaults.forEach((item) => {
+    map.set(item.id, item);
+  });
+
+  existing.forEach((item) => {
+    if (!item?.id) return;
+    map.set(item.id, { ...(map.get(item.id) || {}), ...item });
+  });
+
+  return Array.from(map.values());
 }
 
 function bindGlobalEvents() {
@@ -103,8 +141,7 @@ function saveState(state) {
 }
 
 function seedSubscriptions() {
-  return [
-  ];
+  return [];
 }
 
 function navigate(path) {
@@ -224,7 +261,7 @@ function renderHome() {
         <span class="helper">${filteredList.length} 个订阅</span>
       </div>
       <div class="filter-bar">
-        <input type="search" id="searchInput" placeholder="搜索服务/标签" value="${filters.search}" />
+        <input type="search" id="searchInput" placeholder="搜索服务/标签" value="${escapeHtml(filters.search)}" />
         <select id="filterTime">
           <option value="all" ${filters.time === "all" ? "selected" : ""}>时间</option>
           <option value="month" ${filters.time === "month" ? "selected" : ""}>本月</option>
@@ -242,7 +279,9 @@ function renderHome() {
           ${data.categories
             .map(
               (cat) =>
-                `<option value="${cat.id}" ${filters.category === cat.id ? "selected" : ""}>${cat.name}</option>`
+                `<option value="${cat.id}" ${filters.category === cat.id ? "selected" : ""}>${cat.icon || ""} ${
+                  cat.name
+                }</option>`
             )
             .join("")}
         </select>
@@ -278,7 +317,7 @@ function renderUpcomingCards(list, label) {
       const next = getNextChargeDate(sub, new Date());
       return `
         <div class="mini-card">
-          <div class="mini-title">${sub.icon || "🧩"} ${sub.name}</div>
+          <div class="mini-title">${sub.icon || "🧩"} ${escapeHtml(sub.name)}</div>
           <div class="mini-meta">${label} · ${next ? formatDate(next) : "—"}</div>
           <div class="mini-meta">${formatCurrency(sub.amount, sub.currency)}</div>
         </div>
@@ -295,10 +334,10 @@ function renderListItem(sub) {
       <div class="list-left">
         <div class="icon-bubble">${sub.icon || "🧩"}</div>
         <div>
-          <div class="list-title">${sub.name}</div>
+          <div class="list-title">${escapeHtml(sub.name)}</div>
           <div class="list-meta">
             <span class="status-dot"></span>${statusLabels[sub.status] || "未知"} · ${
-    category?.name || "未分类"
+    category ? `${category.icon || ""} ${category.name}` : "未分类"
   } · 下次扣费 ${next ? formatDate(next) : "—"}
           </div>
         </div>
@@ -400,9 +439,7 @@ function renderInsights() {
         <span class="helper">${currency} 视角</span>
       </div>
       <div class="chart-wrap">
-        ${trend
-          .map((item) => `<div class="bar" style="--h:${item.height}%"></div>`)
-          .join("")}
+        ${trend.map((item) => `<div class="bar" style="--h:${item.height}%"></div>`).join("")}
       </div>
       <div class="chart-wrap" style="height:auto;margin-top:6px;">
         ${trend.map((item) => `<div class="bar-label">${item.label}</div>`).join("")}
@@ -414,9 +451,13 @@ function renderInsights() {
         <div class="section-title">续订 / 到期日历</div>
         <span class="helper">${now.getFullYear()} 年 ${now.getMonth() + 1} 月</span>
       </div>
+      <div class="calendar calendar-weekdays">
+        ${["一", "二", "三", "四", "五", "六", "日"].map((day) => `<div class="weekday">${day}</div>`).join("")}
+      </div>
       <div class="calendar">
         ${calendar.map(renderCalendarCell).join("")}
       </div>
+      ${renderCalendarAgenda(calendar)}
     </section>
   `;
 }
@@ -452,7 +493,7 @@ function renderDetail(id) {
   return `
     <section class="card">
       <div class="section-header">
-        <div class="section-title">${sub.icon || "🧩"} ${sub.name}</div>
+        <div class="section-title">${sub.icon || "🧩"} ${escapeHtml(sub.name)}</div>
         <button class="pill" id="backBtn">返回</button>
       </div>
       <div class="stat-grid">
@@ -491,16 +532,15 @@ function renderDetail(id) {
           <div class="stat-value">${statusLabels[sub.status]}</div>
         </div>
       </div>
-      <div class="helper" style="margin-top:8px;">备注：${sub.note || "—"}</div>
+      <div class="helper" style="margin-top:8px;">备注：${escapeHtml(sub.note || "—")}</div>
     </section>
 
     <section class="card">
       <div class="section-header">
         <div class="section-title">更多信息</div>
       </div>
-      <div class="helper">标签：${(sub.tags || []).join("、") || "—"}</div>
-      <div class="helper">类别：${category?.name || "—"}</div>
-      <div class="helper">支付方式：${sub.paymentMethod || "—"}</div>
+      <div class="helper">标签：${(sub.tags || []).map(escapeHtml).join("、") || "—"}</div>
+      <div class="helper">类别：${category ? `${category.icon || ""} ${category.name}` : "—"}</div>
       <div class="helper">币种：${sub.currency}</div>
     </section>
 
@@ -557,7 +597,6 @@ function renderEdit(id) {
     categoryId: "other",
     status: "active",
     tags: [],
-    paymentMethod: "",
     note: ""
   };
   const next = getNextChargeDate(sub, new Date());
@@ -585,9 +624,7 @@ function renderEdit(id) {
             <label>币种</label>
             <select name="currency">
               ${appState.data.currencies
-                .map(
-                  (code) => `<option value="${code}" ${code === sub.currency ? "selected" : ""}>${code}</option>`
-                )
+                .map((code) => `<option value="${code}" ${code === sub.currency ? "selected" : ""}>${code}</option>`)
                 .join("")}
             </select>
           </div>
@@ -622,7 +659,9 @@ function renderEdit(id) {
               ${appState.data.categories
                 .map(
                   (cat) =>
-                    `<option value="${cat.id}" ${cat.id === sub.categoryId ? "selected" : ""}>${cat.name}</option>`
+                    `<option value="${cat.id}" ${cat.id === sub.categoryId ? "selected" : ""}>${cat.icon || ""} ${
+                      cat.name
+                    }</option>`
                 )
                 .join("")}
             </select>
@@ -636,15 +675,9 @@ function renderEdit(id) {
             </select>
           </div>
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>支付方式</label>
-            <input name="paymentMethod" value="${escapeHtml(sub.paymentMethod || "")}" />
-          </div>
-          <div class="form-group">
-            <label>标签（逗号分隔）</label>
-            <input name="tags" value="${escapeHtml((sub.tags || []).join(","))}" />
-          </div>
+        <div class="form-group">
+          <label>标签（逗号分隔）</label>
+          <input name="tags" value="${escapeHtml((sub.tags || []).join(","))}" />
         </div>
         <div class="form-group">
           <label>备注</label>
@@ -670,6 +703,7 @@ function bindEditEvents(id) {
     const form = new FormData(event.target);
     const name = form.get("name").trim();
     if (!name) return alert("请填写服务名");
+
     const amount = Number(form.get("amount")) || 0;
     const cycleType = form.get("cycleType");
     const cycleDays = Number(form.get("cycleDays")) || (cycleType === "customDays" ? 30 : 0);
@@ -686,8 +720,11 @@ function bindEditEvents(id) {
       reminderDays: Number(form.get("reminderDays")) || 0,
       categoryId: form.get("categoryId"),
       status: form.get("status"),
-      tags: form.get("tags").split(",").map((tag) => tag.trim()).filter(Boolean),
-      paymentMethod: form.get("paymentMethod").trim(),
+      tags: form
+        .get("tags")
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean),
       note: form.get("note").trim()
     };
 
@@ -697,6 +734,7 @@ function bindEditEvents(id) {
     } else {
       appState.data.subscriptions.unshift(payload);
     }
+
     saveState(appState.data);
     navigate(`/detail/${payload.id}`);
   });
@@ -704,15 +742,64 @@ function bindEditEvents(id) {
 
 function renderCalendarCell(cell) {
   if (!cell.date) {
-    return `<div class="day" style="opacity:0.4;"></div>`;
+    return `<div class="day empty"></div>`;
   }
-  const dots = cell.events
-    .map((event) => `<span class="dot ${event.type === "expire" ? "expire" : ""}"></span>`)
-    .join("");
+
+  const visibleEvents = cell.events.slice(0, 2);
+  const hiddenCount = Math.max(cell.events.length - visibleEvents.length, 0);
+  const title = cell.events
+    .map((event) => `${event.type === "expire" ? "到期" : "续订"}：${event.name || ""}`)
+    .join(" / ");
+
   return `
-    <div class="day">
-      <div>${cell.date.getDate()}</div>
-      <div style="display:flex;gap:4px;">${dots}</div>
+    <div class="day ${cell.events.length ? "has-events" : ""}" title="${escapeHtml(title)}">
+      <div class="day-number">${cell.date.getDate()}</div>
+      <div class="day-events">
+        ${visibleEvents
+          .map(
+            (event) => `
+              <div class="day-event ${event.type === "expire" ? "expire" : "renew"}">
+                <span>${event.icon || "🧩"}</span>
+                <span>${escapeHtml(event.name || "")}</span>
+              </div>
+            `
+          )
+          .join("")}
+        ${hiddenCount ? `<div class="event-count">+${hiddenCount}</div>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderCalendarAgenda(calendar) {
+  const rows = calendar
+    .filter((cell) => cell.date && cell.events.length)
+    .flatMap((cell) =>
+      cell.events.map((event) => ({
+        date: cell.date,
+        event
+      }))
+    );
+
+  if (!rows.length) {
+    return `<div class="calendar-agenda helper">本月暂无续订或到期事项</div>`;
+  }
+
+  return `
+    <div class="calendar-agenda">
+      ${rows
+        .map(
+          ({ date, event }) => `
+            <div class="agenda-item ${event.type === "expire" ? "expire" : "renew"}">
+              <div>
+                <strong>${formatDate(date)}</strong>
+                <span>${event.type === "expire" ? "到期" : "续订"}</span>
+              </div>
+              <div>${event.icon || "🧩"} ${escapeHtml(event.name || "")}</div>
+            </div>
+          `
+        )
+        .join("")}
     </div>
   `;
 }
@@ -852,20 +939,33 @@ function getCalendarMarks(subs, now) {
   const cells = [];
 
   const eventsByDay = new Map();
+
   subs.forEach((sub) => {
-    const charges = getChargesInRange(sub, firstDay, lastDay);
-    charges.forEach((charge) => {
-      const key = formatDateInput(charge.date);
-      if (!eventsByDay.has(key)) eventsByDay.set(key, []);
-      eventsByDay.get(key).push({ type: "renew" });
-    });
+    if (sub.status === "active") {
+      const charges = getChargesInRange(sub, firstDay, lastDay);
+      charges.forEach((charge) => {
+        const key = formatDateInput(charge.date);
+        if (!eventsByDay.has(key)) eventsByDay.set(key, []);
+        eventsByDay.get(key).push({
+          type: "renew",
+          name: sub.name,
+          icon: sub.icon || "🧩",
+          amount: sub.amount,
+          currency: sub.currency
+        });
+      });
+    }
 
     if (sub.status === "expired") {
       const lastCharge = getLastChargeDate(sub, now);
       if (lastCharge) {
         const key = formatDateInput(lastCharge);
         if (!eventsByDay.has(key)) eventsByDay.set(key, []);
-        eventsByDay.get(key).push({ type: "expire" });
+        eventsByDay.get(key).push({
+          type: "expire",
+          name: sub.name,
+          icon: sub.icon || "🧩"
+        });
       }
     }
   });
@@ -880,6 +980,7 @@ function getCalendarMarks(subs, now) {
       cells.push({ date, events: eventsByDay.get(key) || [] });
     }
   }
+
   return cells;
 }
 
@@ -897,9 +998,9 @@ function exportCsv() {
     "category",
     "reminderDays",
     "tags",
-    "paymentMethod",
     "note"
   ];
+
   const rows = appState.data.subscriptions.map((sub) => {
     const next = getNextChargeDate(sub, new Date());
     const category = appState.data.categories.find((c) => c.id === sub.categoryId)?.name || "";
@@ -916,7 +1017,6 @@ function exportCsv() {
       category,
       sub.reminderDays || 0,
       (sub.tags || []).join("|"),
-      sub.paymentMethod || "",
       (sub.note || "").replace(/\n/g, " ")
     ];
   });
