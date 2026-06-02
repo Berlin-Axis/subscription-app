@@ -1,0 +1,19 @@
+{
+  "name": "订阅管家",
+  "short_name": "订阅管家",
+  "description": "订阅记录与提醒（本地优先）",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F3F4F6",
+  "theme_color": "#34C28B",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

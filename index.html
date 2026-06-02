@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>订阅记录 / 提醒</title>
+    <meta name="theme-color" content="#f3f4f6" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icon.svg" />
+  </head>
+  <body>
+    <div class="app" id="appRoot">
+      <header class="app-header">
+        <div class="brand">
+          <div class="brand-title">订阅管家</div>
+          <div class="brand-sub">本地记录与提醒</div>
+        </div>
+        <div class="header-actions">
+          <button class="pill ghost" id="exportBtn">导出 CSV</button>
+          <button class="icon-btn" id="themeToggle" aria-label="切换主题">🌙</button>
+        </div>
+      </header>
+
+      <nav class="tab-bar">
+        <button class="tab active" data-route="/home">首页</button>
+        <button class="tab" data-route="/insights">洞察</button>
+      </nav>
+
+      <main id="view" class="view"></main>
+
+      <button class="fab" id="fabAdd" aria-label="新增订阅">+</button>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>
