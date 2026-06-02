@@ -1,12 +1,6 @@
 const STORAGE_KEY = "subscription-tracker-v1";
 
 const defaultCategories = [
-  { id: "video", name: "视频" },
-  { id: "music", name: "音乐" },
-  { id: "work", name: "效率" },
-  { id: "cloud", name: "云存储" },
-  { id: "news", name: "资讯" },
-  { id: "other", name: "其他" }
 ];
 
 const defaultCurrencies = ["CNY", "USD", "EUR", "JPY", "HKD"];
