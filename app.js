@@ -1,20 +1,5 @@
 const STORAGE_KEY = "subscription-tracker-v1";
 
-const defaultCategories = [
-  { id: "ai", name: "AI", icon: "🤖" },
-  { id: "vpn", name: "VPN", icon: "🛡️" },
-  { id: "life", name: "生活", icon: "🏠" },
-  { id: "entertainment", name: "娱乐", icon: "🎬" },
-  { id: "productivity", name: "效率工具", icon: "🧰" },
-  { id: "learning", name: "学习", icon: "📚" },
-  { id: "cloud", name: "云服务", icon: "☁️" },
-  { id: "finance", name: "财务", icon: "💳" },
-  { id: "music", name: "音乐", icon: "🎧" },
-  { id: "video", name: "视频", icon: "📺" },
-  { id: "storage", name: "存储", icon: "💾" },
-  { id: "other", name: "其他", icon: "🧩" }
-];
-
 const defaultCurrencies = ["CNY", "USD", "EUR", "JPY", "HKD"];
 
 const statusLabels = {
@@ -36,7 +21,6 @@ const appState = {
     search: "",
     time: "all",
     amount: "all",
-    category: "all",
     status: "all",
     sort: "nextCharge"
   },
@@ -66,16 +50,15 @@ function init() {
 function ensureDefaults() {
   const { data } = appState;
 
-  data.categories = mergeById(data.categories || [], defaultCategories);
   data.currencies = data.currencies?.length ? data.currencies : defaultCurrencies;
   data.subscriptions = data.subscriptions?.length ? data.subscriptions : seedSubscriptions();
 
-  data.subscriptions = data.subscriptions.map(({ paymentMethod, ...sub }) => ({
+  data.subscriptions = data.subscriptions.map(({ icon, categoryId, paymentMethod, tags, ...sub }) => ({
     ...sub,
-    categoryId: sub.categoryId || "other",
     status: sub.status || "active"
   }));
 
+  data.categories = [];
   data.billingRecords = data.billingRecords ?? [];
   data.settings = data.settings ?? { theme: "light", homeCurrency: "CNY", insightsCurrency: "CNY" };
 
@@ -85,21 +68,6 @@ function ensureDefaults() {
   appState.insights.currency = data.settings.insightsCurrency;
 
   saveState(data);
-}
-
-function mergeById(existing = [], defaults = []) {
-  const map = new Map();
-
-  defaults.forEach((item) => {
-    map.set(item.id, item);
-  });
-
-  existing.forEach((item) => {
-    if (!item?.id) return;
-    map.set(item.id, { ...(map.get(item.id) || {}), ...item });
-  });
-
-  return Array.from(map.values());
 }
 
 function bindGlobalEvents() {
@@ -113,26 +81,21 @@ function bindGlobalEvents() {
 }
 
 function loadState() {
+  const fallback = {
+    subscriptions: [],
+    billingRecords: [],
+    categories: [],
+    currencies: [],
+    settings: { theme: "light", homeCurrency: "CNY", insightsCurrency: "CNY" }
+  };
+
   const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) {
-    return {
-      subscriptions: [],
-      billingRecords: [],
-      categories: [],
-      currencies: [],
-      settings: { theme: "light", homeCurrency: "CNY", insightsCurrency: "CNY" }
-    };
-  }
+  if (!raw) return fallback;
+
   try {
     return JSON.parse(raw);
   } catch {
-    return {
-      subscriptions: [],
-      billingRecords: [],
-      categories: [],
-      currencies: [],
-      settings: { theme: "light", homeCurrency: "CNY", insightsCurrency: "CNY" }
-    };
+    return fallback;
   }
 }
 
@@ -212,7 +175,6 @@ function renderHome() {
   });
 
   const upcomingExpire = data.subscriptions.filter((sub) => sub.status !== "active");
-
   const filteredList = applyFilters(data.subscriptions, filters);
 
   return `
@@ -261,7 +223,7 @@ function renderHome() {
         <span class="helper">${filteredList.length} 个订阅</span>
       </div>
       <div class="filter-bar">
-        <input type="search" id="searchInput" placeholder="搜索服务/标签" value="${escapeHtml(filters.search)}" />
+        <input type="search" id="searchInput" placeholder="搜索服务/备注" value="${escapeHtml(filters.search)}" />
         <select id="filterTime">
           <option value="all" ${filters.time === "all" ? "selected" : ""}>时间</option>
           <option value="month" ${filters.time === "month" ? "selected" : ""}>本月</option>
@@ -273,17 +235,6 @@ function renderHome() {
           <option value="mid" ${filters.amount === "mid" ? "selected" : ""}>20 - 100</option>
           <option value="high" ${filters.amount === "high" ? "selected" : ""}>100 - 300</option>
           <option value="top" ${filters.amount === "top" ? "selected" : ""}>≥ 300</option>
-        </select>
-        <select id="filterCategory">
-          <option value="all">类别</option>
-          ${data.categories
-            .map(
-              (cat) =>
-                `<option value="${cat.id}" ${filters.category === cat.id ? "selected" : ""}>${cat.icon || ""} ${
-                  cat.name
-                }</option>`
-            )
-            .join("")}
         </select>
         <select id="filterStatus">
           <option value="all">状态</option>
@@ -312,12 +263,13 @@ function renderUpcomingCards(list, label) {
   if (!list.length) {
     return `<div class="mini-card"><div class="mini-title">${label}</div><div class="mini-meta">暂无</div></div>`;
   }
+
   return list
     .map((sub) => {
       const next = getNextChargeDate(sub, new Date());
       return `
         <div class="mini-card">
-          <div class="mini-title">${sub.icon || "🧩"} ${escapeHtml(sub.name)}</div>
+          <div class="mini-title">${escapeHtml(sub.name)}</div>
           <div class="mini-meta">${label} · ${next ? formatDate(next) : "—"}</div>
           <div class="mini-meta">${formatCurrency(sub.amount, sub.currency)}</div>
         </div>
@@ -328,17 +280,16 @@ function renderUpcomingCards(list, label) {
 
 function renderListItem(sub) {
   const next = getNextChargeDate(sub, new Date());
-  const category = appState.data.categories.find((c) => c.id === sub.categoryId);
+
   return `
     <div class="card list-item" data-id="${sub.id}">
       <div class="list-left">
-        <div class="icon-bubble">${sub.icon || "🧩"}</div>
         <div>
           <div class="list-title">${escapeHtml(sub.name)}</div>
           <div class="list-meta">
-            <span class="status-dot"></span>${statusLabels[sub.status] || "未知"} · ${
-    category ? `${category.icon || ""} ${category.name}` : "未分类"
-  } · 下次扣费 ${next ? formatDate(next) : "—"}
+            <span class="status-dot"></span>${statusLabels[sub.status] || "未知"} · 下次扣费 ${
+    next ? formatDate(next) : "—"
+  }
           </div>
         </div>
       </div>
@@ -352,6 +303,7 @@ function renderListItem(sub) {
 
 function bindHomeEvents() {
   const view = document.getElementById("view");
+
   view.querySelectorAll(".list-item").forEach((item) => {
     item.addEventListener("click", () => navigate(`/detail/${item.dataset.id}`));
   });
@@ -376,11 +328,6 @@ function bindHomeEvents() {
 
   view.querySelector("#filterAmount").addEventListener("change", (event) => {
     appState.filters.amount = event.target.value;
-    render();
-  });
-
-  view.querySelector("#filterCategory").addEventListener("change", (event) => {
-    appState.filters.category = event.target.value;
     render();
   });
 
@@ -464,6 +411,7 @@ function renderInsights() {
 
 function bindInsightsEvents() {
   const view = document.getElementById("view");
+
   view.querySelectorAll("[data-period]").forEach((btn) => {
     btn.addEventListener("click", () => {
       appState.insights.period = btn.dataset.period;
@@ -486,14 +434,14 @@ function renderDetail(id) {
   if (!sub) {
     return `<section class="card">未找到订阅</section>`;
   }
+
   const next = getNextChargeDate(sub, new Date());
   const reminderDate = next ? addDays(new Date(next), -Math.max(sub.reminderDays || 0, 0)) : null;
-  const category = appState.data.categories.find((c) => c.id === sub.categoryId);
 
   return `
     <section class="card">
       <div class="section-header">
-        <div class="section-title">${sub.icon || "🧩"} ${escapeHtml(sub.name)}</div>
+        <div class="section-title">${escapeHtml(sub.name)}</div>
         <button class="pill" id="backBtn">返回</button>
       </div>
       <div class="stat-grid">
@@ -539,8 +487,6 @@ function renderDetail(id) {
       <div class="section-header">
         <div class="section-title">更多信息</div>
       </div>
-      <div class="helper">标签：${(sub.tags || []).map(escapeHtml).join("、") || "—"}</div>
-      <div class="helper">类别：${category ? `${category.icon || ""} ${category.name}` : "—"}</div>
       <div class="helper">币种：${sub.currency}</div>
     </section>
 
@@ -563,14 +509,17 @@ function renderDetail(id) {
 
 function bindDetailEvents(id) {
   const view = document.getElementById("view");
+
   view.querySelector("#backBtn").addEventListener("click", () => navigate("/home"));
   view.querySelector("#editBtn").addEventListener("click", () => navigate(`/edit/${id}`));
+
   view.querySelector("#deleteBtn").addEventListener("click", () => {
     if (!confirm("确定删除该订阅吗？此操作不可恢复。")) return;
     appState.data.subscriptions = appState.data.subscriptions.filter((item) => item.id !== id);
     saveState(appState.data);
     navigate("/home");
   });
+
   view.querySelectorAll("[data-status]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const sub = appState.data.subscriptions.find((item) => item.id === id);
@@ -587,19 +536,18 @@ function renderEdit(id) {
   const sub = editing || {
     id: generateId(),
     name: "",
-    icon: "🧩",
     amount: 0,
     currency: "CNY",
     cycleType: "month",
     cycleDays: 30,
     startDate: formatDateInput(new Date()),
     reminderDays: 3,
-    categoryId: "other",
     status: "active",
-    tags: [],
     note: ""
   };
+
   const next = getNextChargeDate(sub, new Date());
+
   return `
     <section class="card">
       <div class="section-header">
@@ -612,10 +560,6 @@ function renderEdit(id) {
           <input name="name" value="${escapeHtml(sub.name)}" required />
         </div>
         <div class="form-row">
-          <div class="form-group">
-            <label>图标</label>
-            <input name="icon" value="${escapeHtml(sub.icon)}" />
-          </div>
           <div class="form-group">
             <label>金额</label>
             <input name="amount" type="number" min="0" step="0.01" value="${sub.amount}" />
@@ -654,19 +598,6 @@ function renderEdit(id) {
             <input name="reminderDays" type="number" min="0" value="${sub.reminderDays || 0}" />
           </div>
           <div class="form-group">
-            <label>类别</label>
-            <select name="categoryId">
-              ${appState.data.categories
-                .map(
-                  (cat) =>
-                    `<option value="${cat.id}" ${cat.id === sub.categoryId ? "selected" : ""}>${cat.icon || ""} ${
-                      cat.name
-                    }</option>`
-                )
-                .join("")}
-            </select>
-          </div>
-          <div class="form-group">
             <label>状态</label>
             <select name="status">
               <option value="active" ${sub.status === "active" ? "selected" : ""}>进行中</option>
@@ -674,10 +605,6 @@ function renderEdit(id) {
               <option value="expired" ${sub.status === "expired" ? "selected" : ""}>到期</option>
             </select>
           </div>
-        </div>
-        <div class="form-group">
-          <label>标签（逗号分隔）</label>
-          <input name="tags" value="${escapeHtml((sub.tags || []).join(","))}" />
         </div>
         <div class="form-group">
           <label>备注</label>
@@ -695,6 +622,7 @@ function renderEdit(id) {
 
 function bindEditEvents(id) {
   const view = document.getElementById("view");
+
   view.querySelector("#backBtn").addEventListener("click", () => navigate("/home"));
   view.querySelector("#cancelBtn").addEventListener("click", () => navigate("/home"));
 
@@ -711,20 +639,13 @@ function bindEditEvents(id) {
     const payload = {
       id: id || generateId(),
       name,
-      icon: form.get("icon").trim() || "🧩",
       amount,
       currency: form.get("currency"),
       cycleType,
       cycleDays,
       startDate: form.get("startDate"),
       reminderDays: Number(form.get("reminderDays")) || 0,
-      categoryId: form.get("categoryId"),
       status: form.get("status"),
-      tags: form
-        .get("tags")
-        .split(",")
-        .map((tag) => tag.trim())
-        .filter(Boolean),
       note: form.get("note").trim()
     };
 
@@ -759,7 +680,6 @@ function renderCalendarCell(cell) {
           .map(
             (event) => `
               <div class="day-event ${event.type === "expire" ? "expire" : "renew"}">
-                <span>${event.icon || "🧩"}</span>
                 <span>${escapeHtml(event.name || "")}</span>
               </div>
             `
@@ -795,7 +715,7 @@ function renderCalendarAgenda(calendar) {
                 <strong>${formatDate(date)}</strong>
                 <span>${event.type === "expire" ? "到期" : "续订"}</span>
               </div>
-              <div>${event.icon || "🧩"} ${escapeHtml(event.name || "")}</div>
+              <div>${escapeHtml(event.name || "")}</div>
             </div>
           `
         )
@@ -815,11 +735,12 @@ function applyFilters(list, filters) {
     .filter((sub) => {
       if (filters.search) {
         const keyword = filters.search.toLowerCase();
-        const text = `${sub.name} ${(sub.tags || []).join(" ")} ${sub.note || ""}`.toLowerCase();
+        const text = `${sub.name} ${sub.note || ""}`.toLowerCase();
         if (!text.includes(keyword)) return false;
       }
+
       if (filters.status !== "all" && sub.status !== filters.status) return false;
-      if (filters.category !== "all" && sub.categoryId !== filters.category) return false;
+
       if (filters.amount !== "all") {
         const amount = sub.amount || 0;
         if (filters.amount === "low" && amount > 20) return false;
@@ -827,12 +748,14 @@ function applyFilters(list, filters) {
         if (filters.amount === "high" && (amount < 100 || amount > 300)) return false;
         if (filters.amount === "top" && amount < 300) return false;
       }
+
       if (filters.time !== "all") {
         const next = getNextChargeDate(sub, now);
         if (!next) return false;
         if (filters.time === "month" && (next < monthStart || next > monthEnd)) return false;
         if (filters.time === "year" && (next < yearStart || next > yearEnd)) return false;
       }
+
       return true;
     })
     .sort((a, b) => {
@@ -849,6 +772,7 @@ function getChargesInRange(sub, start, end) {
   const charges = [];
   let date = parseDate(sub.startDate);
   if (!date) return charges;
+
   let loopGuard = 0;
   while (date <= end && loopGuard < 2000) {
     if (date >= start) {
@@ -857,6 +781,7 @@ function getChargesInRange(sub, start, end) {
     date = addCycle(date, sub, 1);
     loopGuard += 1;
   }
+
   return charges;
 }
 
@@ -864,18 +789,21 @@ function getNextChargeDate(sub, refDate) {
   const date = parseDate(sub.startDate);
   if (!date) return null;
   if (date >= refDate) return date;
+
   let next = date;
   let loopGuard = 0;
   while (next < refDate && loopGuard < 2000) {
     next = addCycle(next, sub, 1);
     loopGuard += 1;
   }
+
   return next;
 }
 
 function getLastChargeDate(sub, refDate) {
   const date = parseDate(sub.startDate);
   if (!date) return null;
+
   let current = date;
   let prev = date;
   let loopGuard = 0;
@@ -884,6 +812,7 @@ function getLastChargeDate(sub, refDate) {
     current = addCycle(current, sub, 1);
     loopGuard += 1;
   }
+
   return prev;
 }
 
@@ -907,6 +836,7 @@ function getPeriodTotals(subs, period, currency, now) {
 function getTrendData(subs, currency) {
   const now = new Date();
   const points = [];
+
   for (let i = 11; i >= 0; i -= 1) {
     const monthDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const start = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
@@ -916,6 +846,7 @@ function getTrendData(subs, currency) {
       .flatMap((sub) => getChargesInRange(sub, start, end))
       .filter((charge) => charge.currency === currency);
     const total = charges.reduce((sum, item) => sum + item.amount, 0);
+
     points.push({
       label: `${monthDate.getMonth() + 1}月`,
       value: total
@@ -937,7 +868,6 @@ function getCalendarMarks(subs, now) {
   const startOffset = (firstDay.getDay() + 6) % 7;
   const totalCells = Math.ceil((startOffset + lastDay.getDate()) / 7) * 7;
   const cells = [];
-
   const eventsByDay = new Map();
 
   subs.forEach((sub) => {
@@ -949,7 +879,6 @@ function getCalendarMarks(subs, now) {
         eventsByDay.get(key).push({
           type: "renew",
           name: sub.name,
-          icon: sub.icon || "🧩",
           amount: sub.amount,
           currency: sub.currency
         });
@@ -963,8 +892,7 @@ function getCalendarMarks(subs, now) {
         if (!eventsByDay.has(key)) eventsByDay.set(key, []);
         eventsByDay.get(key).push({
           type: "expire",
-          name: sub.name,
-          icon: sub.icon || "🧩"
+          name: sub.name
         });
       }
     }
@@ -995,15 +923,12 @@ function exportCsv() {
     "startDate",
     "nextChargeDate",
     "status",
-    "category",
     "reminderDays",
-    "tags",
     "note"
   ];
 
   const rows = appState.data.subscriptions.map((sub) => {
     const next = getNextChargeDate(sub, new Date());
-    const category = appState.data.categories.find((c) => c.id === sub.categoryId)?.name || "";
     return [
       sub.id,
       sub.name,
@@ -1014,9 +939,7 @@ function exportCsv() {
       sub.startDate,
       next ? formatDateInput(next) : "",
       sub.status,
-      category,
       sub.reminderDays || 0,
-      (sub.tags || []).join("|"),
       (sub.note || "").replace(/\n/g, " ")
     ];
   });
